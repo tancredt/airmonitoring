@@ -13,7 +13,7 @@ class JobViewSet(viewsets.ModelViewSet):
   queryset = Job.objects.all()
   serializer_class = JobSerializer
   authentication_classes = [SessionAuthentication]
-  permission_classes = [permissions.IsAuthenticated]
+  permission_classes = [IsAuthenticated]
 
     
 
