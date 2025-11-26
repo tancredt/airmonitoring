@@ -81,7 +81,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'OPTIONS': {
             "service": "airmonitoring_service",
-            "passfile": ".my_pgpass",
+            "passfile": ".pgpass",
         },
     }
 }
