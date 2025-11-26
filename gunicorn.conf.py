@@ -1,0 +1,9 @@
+bind = "127.0.0.1:8000"
+workers = 3
+timeout = 120
+keepalive = 2
+max_requests = 10
+max_requests_jitter = 100
+preload_app = True
+worker_class = "sync"
+worker_connections = 10
