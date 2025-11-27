@@ -1,2 +1,0 @@
-localhost	FALSE	/	FALSE	0	csrftoken	gi1J5D0fP1R1VVZssPfhSIGLwoNJpFqi
-localhost	FALSE	/	FALSE	0	sessionid	getencgdgxsibjis7v9uns8y0oodwnij
