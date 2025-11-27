@@ -1,0 +1,20 @@
+[Unit]
+Description=Gunicorn instance to serve apis
+After=network.target
+Requires=postgresql.service  # Add this line if you're using PostgreSQL
+
+[Service]
+Type=notify
+User=nick
+Group=nick
+WorkingDirectory=/home/nick/Programming/apis
+Environment="PATH=/home/nick/Programming/apis/venv/bin"
+ExecStart=/home/nick/Programming/apis/venv/bin/gunicorn --access-logfile - --workers 3 --bind 127.0.0.1:8000 --config /home/nick/Programming/apis/gunicorn.conf.py apis.wsgi:application
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=apis
+
+[Install]
+WantedBy=multi-user.target
