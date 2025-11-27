@@ -5,7 +5,7 @@ def authenticate_and_save_cookies(username, password, cookie_file="cookies.txt")
     session = requests.Session()
 
     # Get login page to retrieve CSRF token
-    login_url = "http://127.0.0.1:8000/admin/login/"
+    login_url = "http://localhost/admin/login/"
     response = session.get(login_url)
     soup = BeautifulSoup(response.text, 'html.parser')
     csrf_token = soup.find('input', {'name': 'csrfmiddlewaretoken'})['value']
@@ -25,7 +25,7 @@ def authenticate_and_save_cookies(username, password, cookie_file="cookies.txt")
         with open(cookie_file, 'w') as f:
             for cookie in session.cookies:
                 # Format: domain flag path flag secure expiration name value
-                f.write(f"127.0.0.1\tFALSE\t/\tFALSE\t0\t{cookie.name}\t{cookie.value}\n")
+                f.write(f"localhost\tFALSE\t/\tFALSE\t0\t{cookie.name}\t{cookie.value}\n")
 
         print(f"Authentication successful. Cookies saved to {cookie_file}")
         return session
