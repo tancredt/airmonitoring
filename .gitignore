@@ -1,0 +1,5 @@
+.pgpass
+static/
+apis/__pycache__/
+airmonitoring/__pycache__
+airmonitoring/migrations
