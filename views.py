@@ -1,3 +1,10 @@
+import logging
+import datetime
+import csv
+import io
+import re
+from datetime import datetime, timedelta
+
 from rest_framework import viewsets, permissions
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
@@ -12,11 +19,9 @@ from django.core.exceptions import ValidationError
 from django.db.models import Avg, Min, Max, Count, Q
 from django.utils import timezone
 from django.conf import settings
-import datetime
-import csv
-import io
-import re
-from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
+
 from .models import Job, Location, Detector, Sensor, LocationSchedule, SensorInvalidation, SensorReading
 from .serializers import (
     JobSerializer, LocationSerializer, DetectorSerializer, SensorSerializer,
@@ -68,7 +73,7 @@ class DetectorViewSet(viewsets.ModelViewSet):
 
 class DetectorSensorViewSet(viewsets.ModelViewSet):
     serializer_class = SensorSerializer
-    authentication_classes = [SessionAuthenticationn]
+    authentication_classes = [SessionAuthentication]
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     
     def get_queryset(self):
@@ -106,17 +111,21 @@ class CSVImportViewSet(viewsets.ViewSet):
         """
         Handle CSV file upload and import the data.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
         file_obj = request.FILES.get('file')
         if not file_obj:
             return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
-            
+
         if not file_obj.name.endswith('.csv'):
             return Response({'error': 'File must be a CSV'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         try:
             # Process the CSV file
             created_detectors, created_sensors, created_readings = self.process_csv(file_obj)
-            
+
+            logger.info(f"CSV import successful: {created_detectors} detectors, {created_sensors} sensors, {created_readings} readings created")
             return Response({
                 'message': 'CSV import successful',
                 'statistics': {
@@ -125,9 +134,116 @@ class CSVImportViewSet(viewsets.ViewSet):
                     'readings_created': created_readings
                 }
             }, status=status.HTTP_201_CREATED)
-            
+
+        except ValidationError as e:
+            logger.error(f"Validation error during CSV import: {str(e)}")
+            return Response({'error': f'Validation error: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+        except UnicodeDecodeError as e:
+            logger.error(f"File encoding error during CSV import: {str(e)}")
+            return Response({'error': 'Invalid file encoding. Please ensure the CSV file is UTF-8 encoded.'}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            logger.error(f"Unexpected error during CSV import: {str(e)}")
+            return Response({'error': f'Import failed: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+    def process_csv(self, file_obj):
+        """
+        Process the CSV file and import data into the database.
+        Expected CSV format: sensor_id, log_time, longitude, latitude, status, battery, reading, location_id
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        created_detectors = 0
+        created_sensors = 0
+        created_readings = 0
+
+        # Read and decode file content
+        file_content = file_obj.read().decode('utf-8-sig')  # Use utf-8-sig to handle BOM
+        csv_reader = csv.DictReader(io.StringIO(file_content))
+
+        # Required headers - adjust as needed based on your actual CSV format
+        required_headers = ['sensor_id', 'log_time', 'reading', 'location_id']  # Add more as needed
+        file_headers = [header.strip().lower() for header in csv_reader.fieldnames]
+
+        for required_header in required_headers:
+            if required_header not in file_headers:
+                raise ValidationError(f"Missing required column: {required_header}")
+
+        for row_num, row in enumerate(csv_reader, start=2):  # Start at 2 since 1 is header
+            try:
+                # Clean up the row values
+                cleaned_row = {k.strip().lower(): v.strip() if isinstance(v, str) else v for k, v in row.items()}
+
+                # Validate and parse required fields
+                if not cleaned_row.get('log_time'):
+                    logger.warning(f"Row {row_num}: Missing log_time, skipping row")
+                    continue
+
+                # Parse log_time
+                log_time_str = cleaned_row['log_time']
+                try:
+                    # Try different common datetime formats
+                    log_time = None
+                    for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y/%m/%d %H:%M:%S', '%Y/%m/%d %H:%M']:
+                        try:
+                            log_time = datetime.datetime.strptime(log_time_str, fmt)
+                            break
+                        except ValueError:
+                            continue
+
+                    if log_time is None:
+                        raise ValidationError(f"Invalid datetime format: {log_time_str}")
+                except Exception:
+                    raise ValidationError(f"Invalid datetime format: {log_time_str}")
+
+                # Parse required numeric fields
+                try:
+                    sensor_id = int(cleaned_row['sensor_id'])
+                    location_id = int(cleaned_row['location_id']) if cleaned_row.get('location_id') else None
+                    reading = float(cleaned_row['reading'])
+                except (ValueError, TypeError):
+                    raise ValidationError("sensor_id, location_id, and reading must be numeric")
+
+                # Handle optional fields
+                longitude = float(cleaned_row['longitude']) if cleaned_row.get('longitude', '').strip() else None
+                latitude = float(cleaned_row['latitude']) if cleaned_row.get('latitude', '').strip() else None
+                status_field = cleaned_row.get('status', '').strip() or None
+                battery = int(cleaned_row['battery']) if cleaned_row.get('battery', '').strip() else None
+
+                # Validate foreign key relationships
+                try:
+                    sensor = Sensor.objects.get(id=sensor_id)
+                except Sensor.DoesNotExist:
+                    raise ValidationError(f"Sensor with ID {sensor_id} does not exist")
+
+                location = None
+                if location_id:
+                    try:
+                        location = Location.objects.get(id=location_id)
+                    except Location.DoesNotExist:
+                        raise ValidationError(f"Location with ID {location_id} does not exist")
+
+                # Create the sensor reading
+                SensorReading.objects.create(
+                    sensor=sensor,
+                    log_time=log_time,
+                    longitude=longitude,
+                    latitude=latitude,
+                    status=status_field,
+                    battery=battery,
+                    reading=reading,
+                    location=location
+                )
+                created_readings += 1
+
+            except ValidationError as e:
+                logger.error(f"Row {row_num} validation error: {str(e)}")
+                raise ValidationError(f"Row {row_num}: {str(e)}")
+            except Exception as e:
+                logger.error(f"Row {row_num} processing error: {str(e)}")
+                raise ValidationError(f"Row {row_num}: Unexpected error - {str(e)}")
+
+        return created_detectors, created_sensors, created_readings
 
 
 class SensorReadingViewSet(viewsets.ModelViewSet):
@@ -716,21 +832,6 @@ def paginated_raw_data(request, job_id=None):
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
-def logout_view(request):
-    """
-    Logout endpoint that deletes the user's authentication token.
-    """
-    try:
-        # Get the user's token
-        token = Token.objects.get(user=request.user)
-        # Delete the token
-        token.delete()
-        return Response({'message': 'Successfully logged out'}, status=status.HTTP_200_OK)
-    except Token.DoesNotExist:
-        # Token doesn't exist, but we can still return success
-        return Response({'message': 'Successfully logged out'}, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])

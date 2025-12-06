@@ -208,7 +208,14 @@ class SensorReading(models.Model):
 # --- Utility Functions ---
 
 def updateSensorReadingLocations():
-    """Updates SensorReading location fields based on LocationSchedule."""
+    """
+    Updates SensorReading location fields based on LocationSchedule.
+
+    This function:
+    1. Clears all existing location references in sensor readings
+    2. Sets the location for each reading based on the schedule that was active
+       at the time of the reading
+    """
     # Clear all locations first
     SensorReading.objects.all().update(location=None)
 
@@ -216,27 +223,31 @@ def updateSensorReadingLocations():
     for schedule in LocationSchedule.objects.select_related('location', 'detector').all():
         # Get all sensors for this detector
         sensors = Sensor.objects.filter(detector=schedule.detector)
-        
+
         for sensor in sensors:
             # Build the query for readings matching this sensor and time range
             reading_query = SensorReading.objects.filter(
                 sensor=sensor,
                 log_time__gte=schedule.start_dt
             )
-            
+
             # If there's an end time, add that condition
             if schedule.stop_dt:
                 reading_query = reading_query.filter(log_time__lte=schedule.stop_dt)
-                
+
             # Update the location for matching readings
             updated_count = reading_query.update(location=schedule.location)
             # print(f"Updated {updated_count} readings for sensor {sensor} with location {schedule.location}")
 
 
-
-
 def getDateTimeRange():
-    """Returns tuple: (first_log_time, last_log_time)"""
+    """
+    Returns the range of datetime values from all sensor readings.
+
+    Returns:
+        tuple: (first_log_time, last_log_time) representing the minimum and maximum
+               log_time values in the SensorReading table, or (None, None) if no readings exist
+    """
     agg = SensorReading.objects.aggregate(
         min_time=models.Min('log_time'),
         max_time=models.Max('log_time')
@@ -245,40 +256,43 @@ def getDateTimeRange():
 
 
 def updateValidations():
-    """Updates SensorReading validation fields based on SensorInvalidation records.
-    
+    """
+    Updates SensorReading validation fields based on SensorInvalidation records.
+
     This utility function:
     1. Clears all validation references in sensor readings (sets validation field to null)
     2. Updates affected records by putting the foreign key of validation into the validation field
+
+    Returns:
+        int: The total number of sensor readings that were updated with validation references
     """
     # Step 1: Clear all validation references in sensor readings
     SensorReading.objects.all().update(validation=None)
-    
+
     # Step 2: Get all sensor invalidations
     sensor_invalidations = SensorInvalidation.objects.select_related('sensor').all()
-    
+
     # Step 3: Update affected records with validation references
     updated_readings_count = 0
-    
+
     for invalidation in sensor_invalidations:
         # Build the query for readings matching this sensor and time range
         reading_query = SensorReading.objects.filter(
             sensor=invalidation.sensor,
             log_time__gte=invalidation.start_dt
         )
-        
+
         # If there's an end time, add that condition
         if invalidation.stop_dt:
             reading_query = reading_query.filter(log_time__lte=invalidation.stop_dt)
-            
+
         # Update the validation for matching readings
         count = reading_query.update(validation=invalidation)
         updated_readings_count += count
-        
+
         # Uncomment for debugging:
         # print(f"Updated {count} readings for sensor {invalidation.sensor} with validation {invalidation.id}")
-    
+
     # Return the total number of updated readings
     return updated_readings_count
-
 

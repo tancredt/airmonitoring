@@ -230,7 +230,6 @@ def getReport(getData):
     interval = getData.get('interval', 60)
     
     # Capture the time when the report is being generated
-    import datetime
     generation_datetime = datetime.datetime.now()
     
     # Fetch the job
